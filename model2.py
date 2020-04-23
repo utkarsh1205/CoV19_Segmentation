@@ -23,7 +23,7 @@ def conv_block(tensor, nfilters, size=3, padding='same', initializer="he_normal"
     x = Activation("relu")(x)
     # x = Conv2D(filters=nfilters, kernel_size=(size, size), padding=padding, kernel_initializer=initializer)(x)
     # x = BatchNormalization()(x)
-    x = Activation("relu")(x)
+    # x = Activation("relu")(x)
     return x
 
 
