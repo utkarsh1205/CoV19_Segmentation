@@ -1,4 +1,5 @@
 from model import *
+from model2 import *
 import matplotlib.pyplot as plt
 import os
 from os.path import join
@@ -7,6 +8,7 @@ import numpy as np
 from keras.applications.resnet50 import preprocess_input
 from keras.preprocessing.image import load_img, img_to_array
 from keras.utils import to_categorical
+from keras.callbacks import EarlyStopping
 
 #Creating list of image paths
 image_dir = "dataset/Train/Image"
@@ -48,24 +50,28 @@ train_masks = train_masks[...,0]
 train_masks=to_categorical(train_masks, num_classes=4)
 
 #Initializing model
-model = unet()
+#model = unet()          #unet from model.py
+model = unet2()          #unet from model2.py , uses batch normalisation
 model_checkpoint = ModelCheckpoint('unet_covid19.hdf5',
                                     monitor='loss',verbose=1,
                                     save_best_only=True)
 
+model_EarlyStopping = EarlyStopping(monitor='val_loss',
+                                    patience=2,
+                                    restore_best_weights=True)
 
-model.fit(train_im_arr,
+model.fit(train_imgs,
           train_masks,batch_size=4,
-          epochs = 2,
+          epochs = 10,
           validation_split=0.3,
           shuffle=True,
-          callbacks=[model_checkpoint],
+          callbacks=[model_checkpoint,model_EarlyStopping]
           )
 
 from data import testGenerator
 testGene = testGenerator("dataset/Test/Image", num_image = 20)
 results = model.predict_generator(testGene,20,verbose=1)
 
-result1 = results[0]
-plt.imshow(result1[:,:,0])
-saveResult("dataset/Test/Results2",results)
+plt.imshow(results[0,:,:,0])
+
+#saveResult("dataset/Test/Results2",results)
