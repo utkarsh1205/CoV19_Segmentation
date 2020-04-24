@@ -21,9 +21,9 @@ def conv_block(tensor, nfilters, size=3, padding='same', initializer="he_normal"
     x = Conv2D(filters=nfilters, kernel_size=(size, size), padding=padding, kernel_initializer=initializer)(tensor)
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
-    # x = Conv2D(filters=nfilters, kernel_size=(size, size), padding=padding, kernel_initializer=initializer)(x)
-    # x = BatchNormalization()(x)
-    # x = Activation("relu")(x)
+    x = Conv2D(filters=nfilters, kernel_size=(size, size), padding=padding, kernel_initializer=initializer)(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
     return x
 
 
@@ -32,6 +32,60 @@ def deconv_block(tensor, residual, nfilters, size=3, padding='same', strides=(2,
     y = concatenate([y, residual], axis=3)
     y = conv_block(y, nfilters)
     return y
+
+def dice_coeff(y_true, y_pred):
+    y_true_n = y_true[...,1:]
+    y_pred_n = y_pred[...,1:]
+    smooth = 1.
+    y_true_f = tf.reshape(y_true_n, [-1])
+    y_pred_f = tf.reshape(y_pred_n, [-1])
+    intersection = tf.reduce_sum(tf.multiply(y_true_f,y_pred_f))
+    score = (2. * intersection) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
+    return score
+
+def categorical_focal_loss(gamma=2., alpha=.25):
+    """
+    Softmax version of focal loss.
+           m
+      FL = ∑  -alpha * (1 - p_o,c)^gamma * y_o,c * log(p_o,c)
+          c=1
+      where m = number of classes, c = class and o = observation
+    Parameters:
+      alpha -- the same as weighing factor in balanced cross entropy
+      gamma -- focusing parameter for modulating factor (1-p)
+    Default value:
+      gamma -- 2.0 as mentioned in the paper
+      alpha -- 0.25 as mentioned in the paper
+    References:
+        Official paper: https://arxiv.org/pdf/1708.02002.pdf
+        https://www.tensorflow.org/api_docs/python/tf/keras/backend/categorical_crossentropy
+    Usage:
+     model.compile(loss=[categorical_focal_loss(alpha=.25, gamma=2)], metrics=["accuracy"], optimizer=adam)
+    """
+    def categorical_focal_loss_fixed(y_true, y_pred):
+        """
+        :param y_true: A tensor of the same shape as `y_pred`
+        :param y_pred: A tensor resulting from a softmax
+        :return: Output tensor.
+        """
+
+        # Scale predictions so that the class probas of each sample sum to 1
+        y_pred /= K.sum(y_pred, axis=-1, keepdims=True)
+
+        # Clip the prediction value to prevent NaN's and Inf's
+        epsilon = K.epsilon()
+        y_pred = K.clip(y_pred, epsilon, 1. - epsilon)
+
+        # Calculate Cross Entropy
+        cross_entropy = -y_true * K.log(y_pred)
+
+        # Calculate Focal Loss
+        loss = alpha * K.pow(1 - y_pred, gamma) * cross_entropy
+
+        # Compute mean loss in mini_batch
+        return K.mean(loss, axis=1)
+
+    return categorical_focal_loss_fixed
 
 
 def unet2(img_height=256, img_width=256, nclasses=4, filters=64, nchannels=1):
@@ -62,17 +116,8 @@ def unet2(img_height=256, img_width=256, nclasses=4, filters=64, nchannels=1):
 
     model = Model(inputs=input_layer, outputs=output_layer, name='Unet')
     
-    def dice_coeff(y_true, y_pred):
-        y_true_n = y_true[...,1:]
-        y_pred_n = y_pred[...,1:]
-        smooth = 1.
-        y_true_f = tf.reshape(y_true_n, [-1])
-        y_pred_f = tf.reshape(y_pred_n, [-1])
-        intersection = tf.reduce_sum(tf.multiply(y_true_f,y_pred_f))
-        score = (2. * intersection) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
-        return score
     
-    model.compile(optimizer = Adam(lr = 1e-4),
-                  loss = 'categorical_crossentropy',
+    model.compile(optimizer = Adam(lr = 1e-5),
+                  loss=[categorical_focal_loss(alpha=.25, gamma=2)],
                   metrics = [dice_coeff,'accuracy'])
     return model
