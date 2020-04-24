@@ -9,6 +9,59 @@ from keras.optimizers import *
 from keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from keras import backend as keras
 
+def dice_coeff(y_true, y_pred):
+    y_true_n = y_true[...,1:]
+    y_pred_n = y_pred[...,1:]
+    smooth = 1.
+    y_true_f = tf.reshape(y_true_n, [-1])
+    y_pred_f = tf.reshape(y_pred_n, [-1])
+    intersection = tf.reduce_sum(tf.multiply(y_true_f,y_pred_f))
+    score = (2. * intersection) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
+    return score
+
+def categorical_focal_loss(gamma=2., alpha=.25):
+    """
+    Softmax version of focal loss.
+           m
+      FL = ∑  -alpha * (1 - p_o,c)^gamma * y_o,c * log(p_o,c)
+          c=1
+      where m = number of classes, c = class and o = observation
+    Parameters:
+      alpha -- the same as weighing factor in balanced cross entropy
+      gamma -- focusing parameter for modulating factor (1-p)
+    Default value:
+      gamma -- 2.0 as mentioned in the paper
+      alpha -- 0.25 as mentioned in the paper
+    References:
+        Official paper: https://arxiv.org/pdf/1708.02002.pdf
+        https://www.tensorflow.org/api_docs/python/tf/keras/backend/categorical_crossentropy
+    Usage:
+     model.compile(loss=[categorical_focal_loss(alpha=.25, gamma=2)], metrics=["accuracy"], optimizer=adam)
+    """
+    def categorical_focal_loss_fixed(y_true, y_pred):
+        """
+        :param y_true: A tensor of the same shape as `y_pred`
+        :param y_pred: A tensor resulting from a softmax
+        :return: Output tensor.
+        """
+
+        # Scale predictions so that the class probas of each sample sum to 1
+        y_pred /= K.sum(y_pred, axis=-1, keepdims=True)
+
+        # Clip the prediction value to prevent NaN's and Inf's
+        epsilon = K.epsilon()
+        y_pred = K.clip(y_pred, epsilon, 1. - epsilon)
+
+        # Calculate Cross Entropy
+        cross_entropy = -y_true * K.log(y_pred)
+
+        # Calculate Focal Loss
+        loss = alpha * K.pow(1 - y_pred, gamma) * cross_entropy
+
+        # Compute mean loss in mini_batch
+        return K.mean(loss, axis=1)
+
+    return categorical_focal_loss_fixed
 
 def unet(pretrained_weights = None,input_size = (256,256,1)):
     inputs = Input(input_size)
@@ -54,19 +107,10 @@ def unet(pretrained_weights = None,input_size = (256,256,1)):
 
     model = Model(inputs = inputs, outputs = conv10)
     
-    def dice_coeff(y_true, y_pred):
-        y_true_n = y_true[...,1:]
-        y_pred_n = y_pred[...,1:]
-        smooth = 1.
-        y_true_f = tf.reshape(y_true_n, [-1])
-        y_pred_f = tf.reshape(y_pred_n, [-1])
-        intersection = tf.reduce_sum(tf.multiply(y_true_f,y_pred_f))
-        score = (2. * intersection) / (tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) + smooth)
-        return score
 
     model.compile(optimizer = Adam(lr = 1e-4),
-                  loss = 'categorical_crossentropy',
-                  metrics = [dice_coeff])
+                  loss = [categorical_focal_loss(alpha=.25, gamma=2)],
+                  metrics = [dice_coeff,'accuracy'])
     
     #model.summary()
 
